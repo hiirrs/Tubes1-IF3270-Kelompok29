@@ -69,8 +69,9 @@ x = np.array([
 ])
 y = np.array([
     [1],
-    [0.05],
-    [0.1]
+    [0],
+    [1],
+    [0]
 ])
 epochs = int(input("Number of epochs: "))
 batch_size = int(input("Batch size: "))
