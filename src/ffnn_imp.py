@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List
+from tqdm.auto import trange
 import networkx as nx
 import pickle
 
@@ -40,6 +41,7 @@ class Activation:
     
     @staticmethod
     def softmax(x):
+        # x = np.clip(x, -500, 500) 
         exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
         return exp_x / np.sum(exp_x, axis=1, keepdims=True)
     
@@ -47,6 +49,22 @@ class Activation:
     def softmax_derivative(x):
         # Di backward propagation
         pass
+
+    @staticmethod
+    def leaky_relu(x, alpha=0.01):
+        return np.where(x > 0, x, alpha * x)
+
+    @staticmethod
+    def leaky_relu_derivative(x, alpha=0.01):
+        return np.where(x > 0, 1, alpha)
+
+    @staticmethod
+    def elu(x, alpha=1.0):
+        return np.where(x > 0, x, alpha * (np.exp(x) - 1))
+
+    @staticmethod
+    def elu_derivative(x, alpha=1.0):
+        return np.where(x > 0, 1, alpha * np.exp(x))
 
 
 class Loss:
@@ -99,6 +117,21 @@ class WeightInitializer:
         if seed is not None:
             np.random.seed(seed)
         return np.random.normal(mean, np.sqrt(variance), shape)
+    
+    @staticmethod
+    def xavier(shape, fan_in, fan_out, seed=None):
+        if seed is not None:
+            np.random.seed(seed)
+        limit = np.sqrt(6 / (fan_in + fan_out))
+        return np.random.uniform(-limit, limit, shape)
+
+    @staticmethod
+    def he(shape, fan_in, seed=None):
+        if seed is not None:
+            np.random.seed(seed)
+        stddev = np.sqrt(2 / fan_in)
+        return np.random.normal(0.0, stddev, shape)
+
 
 
 class Layer:
@@ -154,6 +187,21 @@ class Layer:
             seed = weight_init_params.get('seed', None)
             self.weights = WeightInitializer.random_normal(shape_weights, mean, variance, seed)
             self.bias = WeightInitializer.random_normal(shape_bias, mean, variance, seed)
+        elif weight_initializer == 'xavier':
+            seed = weight_init_params.get('seed', None)
+            self.weights = WeightInitializer.xavier(shape_weights, self.input_size, self.output_size, seed)
+            self.bias = WeightInitializer.xavier(shape_bias, self.input_size, self.output_size, seed)
+        elif weight_initializer == 'he':
+            seed = weight_init_params.get('seed', None)
+            self.weights = WeightInitializer.he(shape_weights, self.input_size, seed)
+            self.bias = WeightInitializer.he(shape_bias, self.input_size, seed)
+        elif weight_initializer == 'auto':
+            if self.activation_name in ['relu', 'leaky_relu']:
+                weight_initializer = 'he'
+            elif self.activation_name in ['sigmoid', 'tanh']:
+                weight_initializer = 'xavier'
+            else:
+                weight_initializer = 'random_normal'
         else:
             raise ValueError(f"Unsupported weight initializer: {weight_initializer}")
         
@@ -244,6 +292,13 @@ class FeedForwardNN:
         
         for layer in reversed(self.layers):
             gradient = layer.backward(gradient, learning_rate)
+
+    # @staticmethod
+    # def visualize_progress(epochs, verbose):
+    #     if verbose == 1:
+    #         return trange(epochs, desc="Training", unit="epoch")
+    #     else:
+    #         return range(epochs)
     
     def train(self, X_train, y_train, X_val=None, y_val=None, 
               batch_size=32, learning_rate=0.01, epochs=100, verbose=1):
@@ -258,7 +313,9 @@ class FeedForwardNN:
         
         n_samples = X_train.shape[0]
         history = {'train_loss': [], 'val_loss': []}
+        # epoch_iter = self.visualize_progress(epochs, verbose)
         
+        # for epoch in epoch_iter:
         for epoch in range(epochs):
             indices = np.random.permutation(n_samples)
             X_shuffled = X_train[indices]
@@ -289,8 +346,12 @@ class FeedForwardNN:
             
             if verbose == 1:
                 if validate:
+                    # epoch_iter.set_description(f"Epoch {epoch+1}/{epochs}")
+                    # epoch_iter.set_postfix(train_loss=avg_train_loss, val_loss=val_loss)
                     print(f"Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f} - Val Loss: {val_loss:.4f}")
                 else:
+                    # epoch_iter.set_description(f"Epoch {epoch+1}/{epochs}")
+                    # epoch_iter.set_postfix(train_loss=avg_train_loss)
                     print(f"Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f}")
         
         return history
@@ -302,6 +363,7 @@ class FeedForwardNN:
         y_pred = self.predict(X)
         loss = self.loss_function(y_true, y_pred)
         return loss
+    
     
     def visualize_model(self, figsize=(10, 8)):
         G = nx.DiGraph()
