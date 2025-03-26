@@ -163,6 +163,14 @@ class Layer:
         elif activation == 'softmax':
             self.activation = Activation.softmax
             self.activation_derivative = None  #Backward pass
+        elif activation == 'leaky_relu':
+            alpha = weight_init_params.get('alpha', 0.01) if weight_init_params else 0.01
+            self.activation = lambda x: Activation.leaky_relu(x, alpha)
+            self.activation_derivative = lambda x: Activation.leaky_relu_derivative(x, alpha)
+        elif activation == 'elu':
+            alpha = weight_init_params.get('alpha', 1.0) if weight_init_params else 1.0
+            self.activation = lambda x: Activation.elu(x, alpha)
+            self.activation_derivative = lambda x: Activation.elu_derivative(x, alpha)
         else:
             raise ValueError(f"Unsupported activation function: {activation}")
         
