@@ -141,7 +141,8 @@ class Layer:
         output_size: int,
         activation: str = 'linear',
         weight_initializer: str = 'random_normal',
-        weight_init_params: dict = None
+        weight_init_params: dict = None,
+        normalization: str = None
     ):
         self.input_size = input_size
         self.output_size = output_size
@@ -212,10 +213,20 @@ class Layer:
         self.input = None
         self.output = None
         self.linear_output = None
+
+        self.normalization = normalization
+        if normalization == 'rmsnorm':
+            self.norm_layer = RMSNorm(output_size)
+        else:
+            self.norm_layer = None
     
     def forward(self, x):
         self.input = x
         self.linear_output = np.dot(x, self.weights) + self.bias
+
+        if self.norm_layer is not None:
+            self.linear_output = self.norm_layer.forward(self.linear_output)
+
         self.output = self.activation(self.linear_output)
         return self.output
     
@@ -227,6 +238,9 @@ class Layer:
             activation_gradient = self.activation_derivative(self.linear_output)
             linear_gradient = output_gradient * activation_gradient
         
+        if self.norm_layer is not None:
+            linear_gradient = self.norm_layer.backward(linear_gradient, learning_rate)
+
         self.weights_gradient = np.dot(self.input.T, linear_gradient)
         self.bias_gradient = np.sum(linear_gradient, axis=0, keepdims=True)
         
@@ -236,11 +250,20 @@ class Layer:
         self.bias -= learning_rate * self.bias_gradient
         
         return input_gradient
-
-
-class FeedForwardNN:
     
-    def __init__(self, layer_dimensions: List[int], activations: List[str], loss: str = 'mse', weight_initializer: str = 'random_normal', weight_init_params: dict = None):
+
+
+class FeedForwardNN: 
+    def __init__(
+            self, 
+            layer_dimensions: List[int], 
+            activations: List[str], 
+            loss: str = 'mse', 
+            weight_initializer: str = 'random_normal', 
+            weight_init_params: dict = None,
+            normalization: List[str] = None
+        ):
+        
         if len(layer_dimensions) < 2:
             raise ValueError("Network must have at least input and output layers")
         if len(activations) != len(layer_dimensions) - 1:
@@ -261,6 +284,12 @@ class FeedForwardNN:
             self.loss_derivative = Loss.categorical_cross_entropy_derivative
         else:
             raise ValueError(f"Unsupported loss function: {loss}")
+        
+        if normalization is None:
+            normalization = [None] * (len(layer_dimensions) - 1)
+        
+        if len(normalization) != len(layer_dimensions) - 1:
+            raise ValueError("Number of normalization methods must match number of layers - 1")
 
         # Initialize layers
         self.layers = [Layer(input_size=layer_dimensions[i], output_size=layer_dimensions[i+1],
@@ -269,44 +298,6 @@ class FeedForwardNN:
 
         self.layer_dimensions = layer_dimensions
         self.activations = activations
-
-    def visualize_nn_graph(self, figsize=(12, 6)):     
-        G = nx.DiGraph()
-        layer_names = []
-        
-        for layer_idx, layer in enumerate(self.layers):
-            layer_name = f'Layer {layer_idx}'
-            layer_names.append(layer_name)
-            
-            for node_idx in range(layer.output_size):
-                node_id = f"{layer_name} Neuron {node_idx}"
-                G.add_node(node_id)
-                G.nodes[node_id]['value'] = layer.bias[0][node_idx]  
-                G.nodes[node_id]['layer'] = layer_idx
-                
-                if layer_idx > 0:
-                    prev_layer = self.layers[layer_idx - 1]
-                    for prev_node_idx in range(prev_layer.output_size):
-                        prev_node_id = f"Layer {layer_idx - 1} Neuron {prev_node_idx}"
-                        weight = prev_layer.weights[prev_node_idx, node_idx]
-                        G.add_edge(prev_node_id, node_id, weight=weight)
-        
-        pos = nx.multipartite_layout(G, subset_key="layer")
-        labels = {}
-        
-        for node in G.nodes(data=True):
-            node_id = node[0]
-            value = node[1]['value'] if 'value' in node[1] else ''
-            labels[node_id] = value  # Capture values (weights or biases)
-
-        plt.figure(figsize=figsize)
-        nx.draw(G, pos, with_labels=True, node_size=2000, node_color='lightgray', arrows=True)
-        
-        edge_labels = {(u, v): f"{data['weight']:.4f}" for u, v, data in G.edges(data=True)}
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red')
-        
-        plt.title("Neural Network Structure")
-        plt.show()
     
     def forward(self, x):
         output = x
@@ -323,13 +314,6 @@ class FeedForwardNN:
         for layer in reversed(self.layers):
             gradient = layer.backward(gradient, learning_rate)
 
-    # @staticmethod
-    # def visualize_progress(epochs, verbose):
-    #     if verbose == 1:
-    #         return trange(epochs, desc="Training", unit="epoch")
-    #     else:
-    #         return range(epochs)
-    
     def train(self, X_train, y_train, X_val=None, y_val=None, 
               batch_size=32, learning_rate=0.01, epochs=100, verbose=1):
     
@@ -465,10 +449,9 @@ class FeedForwardNN:
             layer = self.layers[layer_idx]
             weights = layer.weights.flatten()
             
-            # Handle NaN values in weights
             if np.isnan(weights).any() or np.isinf(weights).any():
                 print(f"Warning: Layer {layer_idx+1} contains NaN or Inf values in weights. Filtering for visualization.")
-                # Filter out NaN and Inf values for visualization
+                # remove nan dan inf values for visualization
                 valid_weights = weights[~np.isnan(weights) & ~np.isinf(weights)]
                 
                 if len(valid_weights) > 0:
@@ -541,3 +524,90 @@ class FeedForwardNN:
     def load(filename):
         with open(filename, 'rb') as f:
             return pickle.load(f)
+        
+    def visualize_nn_graph(self, figsize=(12, 6)):     
+        G = nx.DiGraph()
+        layer_names = []
+        
+        for layer_idx, layer in enumerate(self.layers):
+            layer_name = f'Layer {layer_idx}'
+            layer_names.append(layer_name)
+            
+            for node_idx in range(layer.output_size):
+                node_id = f"{layer_name} Neuron {node_idx}"
+                G.add_node(node_id)
+                G.nodes[node_id]['value'] = layer.bias[0][node_idx]  
+                G.nodes[node_id]['layer'] = layer_idx
+                
+                if layer_idx > 0:
+                    prev_layer = self.layers[layer_idx - 1]
+                    for prev_node_idx in range(prev_layer.output_size):
+                        prev_node_id = f"Layer {layer_idx - 1} Neuron {prev_node_idx}"
+                        weight = prev_layer.weights[prev_node_idx, node_idx]
+                        G.add_edge(prev_node_id, node_id, weight=weight)
+        
+        pos = nx.multipartite_layout(G, subset_key="layer")
+        labels = {}
+        
+        for node in G.nodes(data=True):
+            node_id = node[0]
+            value = node[1]['value'] if 'value' in node[1] else ''
+            labels[node_id] = value  
+
+        plt.figure(figsize=figsize)
+        nx.draw(G, pos, with_labels=True, node_size=2000, node_color='lightgray', arrows=True)
+        
+        edge_labels = {(u, v): f"{data['weight']:.4f}" for u, v, data in G.edges(data=True)}
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red')
+        
+        plt.title("Neural Network Structure")
+        plt.show()
+        
+
+class RMSNorm:
+    def __init__(self, num_features, epsilon=1e-8, learnable_scale=True):
+        self.num_features = num_features
+        self.epsilon = epsilon
+        
+        # learnable scaling parameter
+        if learnable_scale:
+            self.scale = np.ones((1, num_features))
+        else:
+            self.scale = None
+        
+        # store inputs buat backward 
+        self.inputs = None
+        self.normalized_inputs = None
+        
+    def forward(self, x):
+        self.inputs = x
+        
+        rms = np.sqrt(np.mean(x**2, axis=1, keepdims=True) + self.epsilon)
+        
+        # normalize
+        self.normalized_inputs = x / rms
+        
+        # apply learnable scale
+        if self.scale is not None:
+            return self.normalized_inputs * self.scale
+        
+        return self.normalized_inputs
+    
+    def backward(self, output_gradient, learning_rate=0.01):
+        rms = np.sqrt(np.mean(self.inputs**2, axis=1, keepdims=True) + self.epsilon)
+        
+        # itung gradient 
+        dx_normalized = output_gradient
+        
+        # apply scale gradient
+        if self.scale is not None:
+            scale_gradient = np.sum(self.normalized_inputs * output_gradient, axis=0, keepdims=True)
+            self.scale -= learning_rate * scale_gradient
+            dx_normalized *= self.scale
+        
+        # itung input gradient
+        dx = (
+            (rms * dx_normalized - self.inputs * (np.mean(self.inputs * dx_normalized, axis=1, keepdims=True) / (rms**2))) / rms
+        )
+        
+        return dx
