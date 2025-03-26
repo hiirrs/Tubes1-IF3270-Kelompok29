@@ -239,6 +239,7 @@ class Layer:
 
 
 class FeedForwardNN:
+    
     def __init__(self, layer_dimensions: List[int], activations: List[str], loss: str = 'mse', weight_initializer: str = 'random_normal', weight_init_params: dict = None):
         if len(layer_dimensions) < 2:
             raise ValueError("Network must have at least input and output layers")
@@ -246,7 +247,20 @@ class FeedForwardNN:
             raise ValueError("Number of activation functions must match number of layers - 1")
 
         # Loss function
-        self.loss_function, self.loss_derivative = self._get_loss_function(loss)
+        # self.loss_function, self.loss_derivative = self._get_loss_function(loss)
+        # loss function
+        self.loss_name = loss
+        if loss == 'mse':
+            self.loss_function = Loss.mse
+            self.loss_derivative = Loss.mse_derivative
+        elif loss == 'binary_cross_entropy':
+            self.loss_function = Loss.binary_cross_entropy
+            self.loss_derivative = Loss.binary_cross_entropy_derivative
+        elif loss == 'categorical_cross_entropy':
+            self.loss_function = Loss.categorical_cross_entropy
+            self.loss_derivative = Loss.categorical_cross_entropy_derivative
+        else:
+            raise ValueError(f"Unsupported loss function: {loss}")
 
         # Initialize layers
         self.layers = [Layer(input_size=layer_dimensions[i], output_size=layer_dimensions[i+1],
@@ -256,7 +270,6 @@ class FeedForwardNN:
         self.layer_dimensions = layer_dimensions
         self.activations = activations
 
-    @staticmethod
     def visualize_nn_graph(self, figsize=(12, 6)):     
         G = nx.DiGraph()
         layer_names = []
