@@ -239,44 +239,60 @@ class Layer:
 
 
 class FeedForwardNN:
-    def __init__(self, layer_dimensions: List[int], activations: List[str], loss: str = 'mse', 
-                 weight_initializer: str = 'random_normal', weight_init_params: dict = None):
-
+    def __init__(self, layer_dimensions: List[int], activations: List[str], loss: str = 'mse', weight_initializer: str = 'random_normal', weight_init_params: dict = None):
         if len(layer_dimensions) < 2:
             raise ValueError("Network must have at least input and output layers")
-        
         if len(activations) != len(layer_dimensions) - 1:
             raise ValueError("Number of activation functions must match number of layers - 1")
-        
-        # loss function
-        self.loss_name = loss
-        if loss == 'mse':
-            self.loss_function = Loss.mse
-            self.loss_derivative = Loss.mse_derivative
-        elif loss == 'binary_cross_entropy':
-            self.loss_function = Loss.binary_cross_entropy
-            self.loss_derivative = Loss.binary_cross_entropy_derivative
-        elif loss == 'categorical_cross_entropy':
-            self.loss_function = Loss.categorical_cross_entropy
-            self.loss_derivative = Loss.categorical_cross_entropy_derivative
-        else:
-            raise ValueError(f"Unsupported loss function: {loss}")
-        
-        # init layers
-        self.layers = []
-        for i in range(len(layer_dimensions) - 1):
-            self.layers.append(
-                Layer(
-                    input_size=layer_dimensions[i],
-                    output_size=layer_dimensions[i+1],
-                    activation=activations[i],
-                    weight_initializer=weight_initializer,
-                    weight_init_params=weight_init_params
-                )
-            )
-        
+
+        # Loss function
+        self.loss_function, self.loss_derivative = self._get_loss_function(loss)
+
+        # Initialize layers
+        self.layers = [Layer(input_size=layer_dimensions[i], output_size=layer_dimensions[i+1],
+                             activation=activations[i], weight_initializer=weight_initializer, 
+                             weight_init_params=weight_init_params) for i in range(len(layer_dimensions) - 1)]
+
         self.layer_dimensions = layer_dimensions
         self.activations = activations
+
+    def visualize_nn_graph(self, figsize=(12, 6)):     
+        G = nx.DiGraph()
+        layer_names = []
+        
+        for layer_idx, layer in enumerate(self.layers):
+            layer_name = f'Layer {layer_idx}'
+            layer_names.append(layer_name)
+            
+            for node_idx in range(layer.output_size):
+                node_id = f"{layer_name} Neuron {node_idx}"
+                G.add_node(node_id)
+                G.nodes[node_id]['value'] = layer.bias[0][node_idx]  
+                G.nodes[node_id]['layer'] = layer_idx
+                
+                if layer_idx > 0:
+                    prev_layer = self.layers[layer_idx - 1]
+                    for prev_node_idx in range(prev_layer.output_size):
+                        prev_node_id = f"Layer {layer_idx - 1} Neuron {prev_node_idx}"
+                        weight = prev_layer.weights[prev_node_idx, node_idx]
+                        G.add_edge(prev_node_id, node_id, weight=weight)
+        
+        pos = nx.multipartite_layout(G, subset_key="layer")
+        labels = {}
+        
+        for node in G.nodes(data=True):
+            node_id = node[0]
+            value = node[1]['value'] if 'value' in node[1] else ''
+            labels[node_id] = value  # Capture values (weights or biases)
+
+        plt.figure(figsize=figsize)
+        nx.draw(G, pos, with_labels=True, node_size=2000, node_color='lightgray', arrows=True)
+        
+        edge_labels = {(u, v): f"{data['weight']:.4f}" for u, v, data in G.edges(data=True)}
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red')
+        
+        plt.title("Neural Network Structure")
+        plt.show()
     
     def forward(self, x):
         output = x
