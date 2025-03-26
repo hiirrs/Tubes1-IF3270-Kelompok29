@@ -256,6 +256,7 @@ class FeedForwardNN:
         self.layer_dimensions = layer_dimensions
         self.activations = activations
 
+    @staticmethod
     def visualize_nn_graph(self, figsize=(12, 6)):     
         G = nx.DiGraph()
         layer_names = []
