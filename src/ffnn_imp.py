@@ -447,6 +447,7 @@ class FeedForwardNN:
         plt.tight_layout()
         return plt
     
+    # Modified plot_weight_distribution method to handle NaN values
     def plot_weight_distribution(self, layers_to_plot=None):
         if layers_to_plot is None:
             layers_to_plot = list(range(len(self.layers)))
@@ -464,15 +465,32 @@ class FeedForwardNN:
             layer = self.layers[layer_idx]
             weights = layer.weights.flatten()
             
-            axs[i].hist(weights, bins=50, color='blue', alpha=0.7)
-            axs[i].set_title(f"Layer {layer_idx+1} Weight Distribution")
+            # Handle NaN values in weights
+            if np.isnan(weights).any() or np.isinf(weights).any():
+                print(f"Warning: Layer {layer_idx+1} contains NaN or Inf values in weights. Filtering for visualization.")
+                # Filter out NaN and Inf values for visualization
+                valid_weights = weights[~np.isnan(weights) & ~np.isinf(weights)]
+                
+                if len(valid_weights) > 0:
+                    axs[i].hist(valid_weights, bins=50, color='blue', alpha=0.7)
+                    axs[i].set_title(f"Layer {layer_idx+1} Weight Distribution\n(filtered {np.isnan(weights).sum()} NaN values)")
+                else:
+                    axs[i].text(0.5, 0.5, "All weights are NaN/Inf", 
+                            horizontalalignment='center', verticalalignment='center',
+                            transform=axs[i].transAxes)
+                    axs[i].set_title(f"Layer {layer_idx+1} Weight Distribution\n(all values are NaN/Inf)")
+            else:
+                axs[i].hist(weights, bins=50, color='blue', alpha=0.7)
+                axs[i].set_title(f"Layer {layer_idx+1} Weight Distribution")
+                
             axs[i].set_xlabel("Weight Value")
             axs[i].set_ylabel("Frequency")
             axs[i].grid(True, alpha=0.3)
         
         plt.tight_layout()
         return plt
-    
+
+    # Modified plot_gradient_distribution method to handle NaN values
     def plot_gradient_distribution(self, layers_to_plot=None):
         if layers_to_plot is None:
             layers_to_plot = list(range(len(self.layers)))
@@ -490,8 +508,24 @@ class FeedForwardNN:
             layer = self.layers[layer_idx]
             gradients = layer.weights_gradient.flatten()
             
-            axs[i].hist(gradients, bins=50, color='red', alpha=0.7)
-            axs[i].set_title(f"Layer {layer_idx+1} Gradient Distribution")
+            # Handle NaN values in gradients
+            if np.isnan(gradients).any() or np.isinf(gradients).any():
+                print(f"Warning: Layer {layer_idx+1} contains NaN or Inf values in gradients. Filtering for visualization.")
+                # Filter out NaN and Inf values for visualization
+                valid_gradients = gradients[~np.isnan(gradients) & ~np.isinf(gradients)]
+                
+                if len(valid_gradients) > 0:
+                    axs[i].hist(valid_gradients, bins=50, color='red', alpha=0.7)
+                    axs[i].set_title(f"Layer {layer_idx+1} Gradient Distribution\n(filtered {np.isnan(gradients).sum()} NaN values)")
+                else:
+                    axs[i].text(0.5, 0.5, "All gradients are NaN/Inf", 
+                            horizontalalignment='center', verticalalignment='center',
+                            transform=axs[i].transAxes)
+                    axs[i].set_title(f"Layer {layer_idx+1} Gradient Distribution\n(all values are NaN/Inf)")
+            else:
+                axs[i].hist(gradients, bins=50, color='red', alpha=0.7)
+                axs[i].set_title(f"Layer {layer_idx+1} Gradient Distribution")
+                
             axs[i].set_xlabel("Gradient Value")
             axs[i].set_ylabel("Frequency")
             axs[i].grid(True, alpha=0.3)
