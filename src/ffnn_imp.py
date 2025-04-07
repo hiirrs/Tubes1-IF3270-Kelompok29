@@ -69,18 +69,30 @@ class Activation:
 
 class Loss:
     @staticmethod
-    def mse(y_true, y_pred):
-        return np.mean(np.square(y_true - y_pred))
+    def mse(y_true, y_pred, model=None, l1_lambda=0, l2_lambda=0):
+        mse_loss = np.mean(np.square(y_true - y_pred))
+        
+        if model is not None:
+            l1_reg, l2_reg = Loss.calculate_regularization(model, l1_lambda, l2_lambda)
+            return mse_loss + l1_reg + l2_reg
+        
+        return mse_loss
     
     @staticmethod
     def mse_derivative(y_true, y_pred):
         return 2 * (y_pred - y_true) / y_true.shape[0]
     
     @staticmethod
-    def binary_cross_entropy(y_true, y_pred):
+    def binary_cross_entropy(y_true, y_pred, model=None, l1_lambda=0, l2_lambda=0):
         epsilon = 1e-15
         y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-        return -np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
+        bce_loss = -np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
+        
+        if model is not None:
+            l1_reg, l2_reg = Loss.calculate_regularization(model, l1_lambda, l2_lambda)
+            return bce_loss + l1_reg + l2_reg
+        
+        return bce_loss
     
     @staticmethod
     def binary_cross_entropy_derivative(y_true, y_pred):
@@ -89,16 +101,37 @@ class Loss:
         return -(y_true / y_pred - (1 - y_true) / (1 - y_pred)) / y_true.shape[0]
     
     @staticmethod
-    def categorical_cross_entropy(y_true, y_pred):
+    def categorical_cross_entropy(y_true, y_pred, model=None, l1_lambda=0, l2_lambda=0):
         epsilon = 1e-15
         y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-        return -np.mean(np.sum(y_true * np.log(y_pred), axis=1))
+        cce_loss = -np.mean(np.sum(y_true * np.log(y_pred), axis=1))
+        
+        if model is not None:
+            l1_reg, l2_reg = Loss.calculate_regularization(model, l1_lambda, l2_lambda)
+            return cce_loss + l1_reg + l2_reg
+        
+        return cce_loss
     
     @staticmethod
     def categorical_cross_entropy_derivative(y_true, y_pred):
         epsilon = 1e-15
         y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
         return -y_true / y_pred / y_true.shape[0]
+    
+    @staticmethod
+    def calculate_regularization(model, l1_lambda, l2_lambda):
+        l1_reg = 0
+        l2_reg = 0
+        
+        if l1_lambda > 0 or l2_lambda > 0:
+            for layer in model.layers:
+                if l1_lambda > 0:
+                    l1_reg += l1_lambda * np.sum(np.abs(layer.weights))
+                
+                if l2_lambda > 0:
+                    l2_reg += l2_lambda * np.sum(np.square(layer.weights)) / 2
+        
+        return l1_reg, l2_reg
 
 
 class WeightInitializer:
@@ -238,7 +271,7 @@ class Layer:
         self.output = self.activation(self.linear_output)
         return self.output
     
-    def backward(self, output_gradient, learning_rate):
+    def backward(self, output_gradient, learning_rate, l1_lambda=0, l2_lambda=0):
         if self.activation_name == 'softmax':
             batch_size = output_gradient.shape[0]
             linear_gradient = output_gradient
@@ -252,6 +285,14 @@ class Layer:
         self.weights_gradient = np.dot(self.input.T, linear_gradient)
         self.bias_gradient = np.sum(linear_gradient, axis=0, keepdims=True)
         
+        if l1_lambda > 0:
+            l1_grad = l1_lambda * np.sign(self.weights)
+            self.weights_gradient += l1_grad
+        
+        if l2_lambda > 0:
+            l2_grad = l2_lambda * self.weights
+            self.weights_gradient += l2_grad
+        
         input_gradient = np.dot(linear_gradient, self.weights.T)
         
         self.weights -= learning_rate * self.weights_gradient
@@ -261,7 +302,7 @@ class Layer:
     
 
 
-class FeedForwardNN: 
+class FeedForwardNN:
     def __init__(
             self, 
             layer_dimensions: List[int], 
@@ -269,7 +310,9 @@ class FeedForwardNN:
             loss: str = 'mse', 
             weight_initializer: str = 'random_normal', 
             weight_init_params: dict = None,
-            normalization: List[str] = None
+            normalization: List[str] = None,
+            l1_lambda: float = 0,  
+            l2_lambda: float = 0   
         ):
         
         if len(layer_dimensions) < 2:
@@ -277,9 +320,9 @@ class FeedForwardNN:
         if len(activations) != len(layer_dimensions) - 1:
             raise ValueError("Number of activation functions must match number of layers - 1")
 
-        # Loss function
-        # self.loss_function, self.loss_derivative = self._get_loss_function(loss)
-        # loss function
+        self.l1_lambda = l1_lambda
+        self.l2_lambda = l2_lambda
+        
         self.loss_name = loss
         if loss == 'mse':
             self.loss_function = Loss.mse
@@ -299,10 +342,9 @@ class FeedForwardNN:
         if len(normalization) != len(layer_dimensions) - 1:
             raise ValueError("Number of normalization methods must match number of layers - 1")
 
-        # Initialize layers
         self.layers = [Layer(input_size=layer_dimensions[i], output_size=layer_dimensions[i+1],
-                             activation=activations[i], weight_initializer=weight_initializer, 
-                             weight_init_params=weight_init_params) for i in range(len(layer_dimensions) - 1)]
+                            activation=activations[i], weight_initializer=weight_initializer, 
+                            weight_init_params=weight_init_params) for i in range(len(layer_dimensions) - 1)]
 
         self.layer_dimensions = layer_dimensions
         self.activations = activations
@@ -320,11 +362,15 @@ class FeedForwardNN:
             gradient = self.loss_derivative(y_true, y_pred)
         
         for layer in reversed(self.layers):
-            gradient = layer.backward(gradient, learning_rate)
+            gradient = layer.backward(gradient, learning_rate, self.l1_lambda, self.l2_lambda)
 
+    def evaluate(self, X, y_true):
+        y_pred = self.predict(X)
+        loss = self.loss_function(y_true, y_pred, model=self, l1_lambda=self.l1_lambda, l2_lambda=self.l2_lambda)
+        return loss
+    
     def train(self, X_train, y_train, X_val=None, y_val=None, 
               batch_size=32, learning_rate=0.01, epochs=100, verbose=1):
-    
         X_train = np.array(X_train)
         y_train = np.array(y_train)
         
@@ -335,9 +381,7 @@ class FeedForwardNN:
         
         n_samples = X_train.shape[0]
         history = {'train_loss': [], 'val_loss': []}
-        # epoch_iter = self.visualize_progress(epochs, verbose)
         
-        # for epoch in epoch_iter:
         for epoch in range(epochs):
             indices = np.random.permutation(n_samples)
             X_shuffled = X_train[indices]
@@ -352,7 +396,12 @@ class FeedForwardNN:
                 
                 y_pred = self.forward(X_batch)
                 
-                batch_loss = self.loss_function(y_batch, y_pred)
+                batch_loss = self.loss_function(
+                    y_batch, y_pred, 
+                    model=self, 
+                    l1_lambda=self.l1_lambda, 
+                    l2_lambda=self.l2_lambda
+                )
                 total_loss += batch_loss
                 batch_count += 1
                 
@@ -363,29 +412,24 @@ class FeedForwardNN:
             
             if validate:
                 y_val_pred = self.forward(X_val)
-                val_loss = self.loss_function(y_val, y_val_pred)
+                val_loss = self.loss_function(
+                    y_val, y_val_pred, 
+                    model=self, 
+                    l1_lambda=self.l1_lambda, 
+                    l2_lambda=self.l2_lambda
+                )
                 history['val_loss'].append(val_loss)
             
             if verbose == 1:
                 if validate:
-                    # epoch_iter.set_description(f"Epoch {epoch+1}/{epochs}")
-                    # epoch_iter.set_postfix(train_loss=avg_train_loss, val_loss=val_loss)
                     print(f"Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f} - Val Loss: {val_loss:.4f}")
                 else:
-                    # epoch_iter.set_description(f"Epoch {epoch+1}/{epochs}")
-                    # epoch_iter.set_postfix(train_loss=avg_train_loss)
                     print(f"Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f}")
         
         return history
     
     def predict(self, X):
         return self.forward(X)
-    
-    def evaluate(self, X, y_true):
-        y_pred = self.predict(X)
-        loss = self.loss_function(y_true, y_pred)
-        return loss
-    
     
     def visualize_model(self, figsize=(10, 8)):
         G = nx.DiGraph()
